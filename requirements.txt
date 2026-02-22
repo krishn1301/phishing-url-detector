@@ -1,0 +1,9 @@
+flask
+scikit-learn
+joblib
+beautifulsoup4
+requests
+numpy
+pandas
+python-whois
+dnspython

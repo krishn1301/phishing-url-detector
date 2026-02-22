@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="Phishing URL Detection – Analyse any URL for phishing risk using Machine Learning.">
+    <title>Phishing URL Detector</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+
+    <!-- Header -->
+    <div class="header">
+        <h1>🔒 Phishing URL Detector</h1>
+        <p>Analyse any URL for phishing risk using Machine Learning</p>
+    </div>
+
+    <!-- Main Card -->
+    <div class="card">
+        <!-- Input -->
+        <div class="input-group">
+            <input type="text" id="urlInput" placeholder="Enter a URL to check…" autocomplete="off">
+            <button id="checkBtn" onclick="checkURL()">Check URL</button>
+        </div>
+
+        <!-- Loader -->
+        <div class="loader" id="loader">
+            <div class="spinner"></div>
+            Analysing URL…
+        </div>
+
+        <!-- Error -->
+        <div class="error-msg" id="errorMsg"></div>
+
+        <!-- Results -->
+        <div class="results" id="results">
+            <!-- Classification -->
+            <div id="badgeContainer"></div>
+
+            <!-- Risk Bar -->
+            <div class="risk-section">
+                <div class="label-row">
+                    <span>Risk Score</span>
+                    <span id="riskPct">0%</span>
+                </div>
+                <div class="risk-bar-bg">
+                    <div class="risk-bar-fill" id="riskBar" style="width:0%"></div>
+                </div>
+            </div>
+
+            <!-- Feature Indicators -->
+            <div class="features-section">
+                <h3>URL Features</h3>
+                <div class="features-grid" id="featuresGrid"></div>
+            </div>
+
+            <!-- Host-Based Features -->
+            <div class="features-section">
+                <h3>🌐 Host-Based Features</h3>
+                <div class="features-grid" id="hostFeaturesGrid"></div>
+            </div>
+
+            <!-- Safe Preview (conditional) -->
+            <div class="preview-section" id="previewSection" style="display:none"></div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+        Phishing URL Detection &mdash; Academic Mini Project &copy; 2026
+    </div>
+
+    <!-- ============ JavaScript ============ -->
+    <script>
+        const urlInput = document.getElementById('urlInput');
+        const checkBtn = document.getElementById('checkBtn');
+        const loader = document.getElementById('loader');
+        const errorMsg = document.getElementById('errorMsg');
+        const results = document.getElementById('results');
+
+        // Allow Enter key to trigger check
+        urlInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') checkURL();
+        });
+
+        async function checkURL() {
+            const url = urlInput.value.trim();
+            if (!url) { showError('Please enter a URL.'); return; }
+
+            // Reset UI
+            hideError();
+            results.classList.remove('active');
+            loader.classList.add('active');
+            checkBtn.disabled = true;
+
+            try {
+                const res = await fetch('/predict', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url }),
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    showError(data.error || 'Something went wrong.');
+                    return;
+                }
+
+                renderResults(data);
+            } catch (err) {
+                showError('Network error – is the server running?');
+            } finally {
+                loader.classList.remove('active');
+                checkBtn.disabled = false;
+            }
+        }
+
+        /* ---- Render ---- */
+        function renderResults(data) {
+            // Badge
+            const isPhishing = data.classification === 'Phishing';
+            document.getElementById('badgeContainer').innerHTML =
+                `<span class="badge ${isPhishing ? 'phishing' : 'legitimate'}">${data.classification}</span>`;
+
+            // Risk bar
+            const pct = data.risk_percentage;
+            document.getElementById('riskPct').textContent = pct.toFixed(1) + '%';
+            const bar = document.getElementById('riskBar');
+            bar.style.width = '0%';
+            bar.style.background = riskColor(pct);
+            requestAnimationFrame(() => { bar.style.width = pct + '%'; });
+
+            // Features — split into URL (first 10) and Host-based (last 4)
+            const HOST_FEATURES = ['Domain Age (days)', 'WHOIS Available', 'DNS A Records', 'DNS Has MX'];
+            const grid = document.getElementById('featuresGrid');
+            const hostGrid = document.getElementById('hostFeaturesGrid');
+            grid.innerHTML = '';
+            hostGrid.innerHTML = '';
+            for (const [name, value] of Object.entries(data.features)) {
+                const div = document.createElement('div');
+                div.className = 'feature-item';
+                div.innerHTML = `<span class="f-name">${name}</span><span class="f-value">${value}</span>`;
+                if (HOST_FEATURES.includes(name)) {
+                    hostGrid.appendChild(div);
+                } else {
+                    grid.appendChild(div);
+                }
+            }
+
+            // Preview
+            const previewSection = document.getElementById('previewSection');
+            if (data.preview) {
+                previewSection.style.display = '';
+                previewSection.innerHTML = buildPreview(data.preview);
+            } else {
+                previewSection.style.display = 'none';
+            }
+
+            results.classList.add('active');
+        }
+
+        function buildPreview(p) {
+            let html = `<h3>⚠ Safe Preview Analysis</h3>`;
+            html += `<div class="preview-item"><strong>Page Title:</strong> ${esc(p.page_title)}</div>`;
+            html += `<div class="preview-item"><strong>Forms:</strong> ${p.form_count} &nbsp;|&nbsp; <strong>Password Fields:</strong> ${p.password_fields}</div>`;
+
+            if (p.external_domains && p.external_domains.length) {
+                html += `<div class="preview-item"><strong>External Form Domains:</strong> ${p.external_domains.map(esc).join(', ')}</div>`;
+            }
+
+            if (p.suspicious_keywords_found && p.suspicious_keywords_found.length) {
+                html += `<div class="preview-item"><strong>Suspicious Keywords:</strong> ${p.suspicious_keywords_found.join(', ')}</div>`;
+            }
+
+            if (p.warnings && p.warnings.length) {
+                html += `<ul class="warning-list">`;
+                p.warnings.forEach(w => { html += `<li>${esc(w)}</li>`; });
+                html += `</ul>`;
+            }
+            return html;
+        }
+
+        /* ---- Helpers ---- */
+        function riskColor(pct) {
+            if (pct < 30) return 'var(--success)';
+            if (pct < 70) return 'var(--warning)';
+            return 'var(--danger)';
+        }
+
+        function showError(msg) {
+            errorMsg.textContent = msg;
+            errorMsg.classList.add('active');
+        }
+
+        function hideError() {
+            errorMsg.classList.remove('active');
+        }
+
+        function esc(str) {
+            const d = document.createElement('div');
+            d.textContent = str;
+            return d.innerHTML;
+        }
+    </script>
+
+</body>
+
+</html>

@@ -1,12 +1,15 @@
 """
-utils.py - Feature Extraction & Safe Preview Module
-=====================================================
-Provides functions to extract numeric features from a URL for ML
-classification and to safely preview a suspicious web page without
-executing any scripts.
+utils.py - Enhanced Feature Extraction & Safe Preview Module
+==============================================================
+Provides functions to extract a 22-element numeric feature vector from
+a URL for ML classification and to safely preview suspicious web pages.
+
+Features cover URL-lexical, host-based, SSL/TLS, redirect-chain,
+URL-shortener, and TLD-risk dimensions.
 """
 
 import re
+import ssl
 import math
 import socket
 import logging
@@ -17,6 +20,7 @@ from collections import Counter
 import requests
 import whois
 import dns.resolver
+import tldextract
 from bs4 import BeautifulSoup
 
 # ---------------------------------------------------------------------------
@@ -27,22 +31,49 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-SUSPICIOUS_KEYWORDS = ["login", "verify", "secure", "bank", "update",
-                       "account", "signin", "confirm", "password", "paypal"]
+SUSPICIOUS_KEYWORDS = [
+    "login", "verify", "secure", "bank", "update", "account", "signin",
+    "confirm", "password", "paypal", "ebay", "apple", "microsoft",
+    "netflix", "amazon", "wallet", "crypto", "suspend", "alert",
+    "unusual", "locked", "expired", "urgent",
+]
 
-SPECIAL_CHARS = ["@", "-", "_"]
+# Known URL shortener domains
+URL_SHORTENERS = {
+    "bit.ly", "tinyurl.com", "t.co", "goo.gl", "is.gd", "ow.ly",
+    "buff.ly", "rebrand.ly", "bl.ink", "short.io", "cutt.ly",
+    "t.ly", "rb.gy", "v.gd", "tiny.cc", "shorturl.at", "clck.ru",
+    "qps.ru", "lnkd.in", "db.tt", "soo.gd", "s2r.co",
+}
+
+# TLDs frequently abused in phishing campaigns
+RISKY_TLDS = {
+    "tk": 1.0, "ml": 1.0, "ga": 1.0, "cf": 1.0, "gq": 1.0,
+    "xyz": 0.8, "top": 0.8, "work": 0.8, "click": 0.8, "loan": 0.9,
+    "download": 0.7, "racing": 0.7, "win": 0.7, "bid": 0.7,
+    "stream": 0.6, "gdn": 0.6, "icu": 0.7, "buzz": 0.6,
+    "rest": 0.5, "fit": 0.5, "cam": 0.5, "surf": 0.5,
+}
+
+# Free / DV-only certificate issuers (common on phishing sites)
+FREE_CERT_ISSUERS = [
+    "let's encrypt", "letsencrypt", "zerossl", "buypass",
+    "ssl.com", "cloudflare", "sectigo",  # free tier
+]
 
 # Regex pattern to detect an IP address used as a hostname
 IP_PATTERN = re.compile(
-    r"^(?:https?://)?(\d{1,3}\.){3}\d{1,3}"
+    r"^(?:https?://)?\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"
 )
 
-# Maximum time (seconds) we will wait when fetching a page for preview
+# Maximum time (seconds) for network operations
 PREVIEW_TIMEOUT = 5
+SSL_TIMEOUT = 4
+REDIRECT_TIMEOUT = 5
 
 
 # ===================================================================
-# FEATURE EXTRACTION
+# FEATURE EXTRACTION  (22 features)
 # ===================================================================
 
 def _shannon_entropy(text: str) -> float:
@@ -76,10 +107,7 @@ def _get_domain_age_days(hostname: str) -> float:
 
 
 def _whois_available(hostname: str) -> int:
-    """
-    Return 1 if WHOIS data can be retrieved for the domain, else 0.
-    A missing WHOIS record is a phishing indicator.
-    """
+    """Return 1 if WHOIS data can be retrieved for the domain, else 0."""
     try:
         w = whois.whois(hostname)
         if w.domain_name:
@@ -107,86 +135,150 @@ def _dns_has_mx(hostname: str) -> int:
         return 0
 
 
+def _is_shortened(hostname: str) -> int:
+    """Return 1 if the URL uses a known URL shortener service."""
+    return 1 if hostname.lower() in URL_SHORTENERS else 0
+
+
+def _count_redirects(url: str) -> int:
+    """Follow the URL and return the number of redirects in the chain."""
+    try:
+        fetch = url if url.startswith(("http://", "https://")) else f"http://{url}"
+        resp = requests.head(
+            fetch, allow_redirects=True, timeout=REDIRECT_TIMEOUT,
+            headers={"User-Agent": "PhishDetector/2.0"}
+        )
+        return len(resp.history)
+    except Exception:
+        return -1
+
+
+def _ssl_info(hostname: str) -> tuple:
+    """
+    Fetch SSL certificate info for *hostname*.
+    Returns (is_valid, days_remaining, is_free_cert).
+    """
+    try:
+        ctx = ssl.create_default_context()
+        with ctx.wrap_socket(socket.socket(), server_hostname=hostname) as s:
+            s.settimeout(SSL_TIMEOUT)
+            s.connect((hostname, 443))
+            cert = s.getpeercert()
+
+        # Validity
+        not_after = datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y %Z")
+        days_remaining = (not_after - datetime.utcnow()).days
+        is_valid = 1 if days_remaining > 0 else 0
+
+        # Free certificate check
+        issuer_str = str(cert.get("issuer", "")).lower()
+        is_free = 1 if any(fi in issuer_str for fi in FREE_CERT_ISSUERS) else 0
+
+        return (is_valid, float(max(days_remaining, 0)), is_free)
+    except Exception:
+        return (0, -1.0, 0)
+
+
+def _tld_risk_score(hostname: str) -> float:
+    """Return a risk score (0.0–1.0) based on the TLD."""
+    ext = tldextract.extract(hostname)
+    tld = ext.suffix.split(".")[-1].lower() if ext.suffix else ""
+    return RISKY_TLDS.get(tld, 0.0)
+
+
+def _path_depth(url: str) -> int:
+    """Return the depth of the URL path (number of / segments)."""
+    try:
+        parsed = urlparse(url if "://" in url else f"http://{url}")
+        path = parsed.path.strip("/")
+        return len(path.split("/")) if path else 0
+    except Exception:
+        return 0
+
+
+def _has_punycode(hostname: str) -> int:
+    """Return 1 if the hostname contains punycode (IDN homograph attack)."""
+    return 1 if hostname.startswith("xn--") or ".xn--" in hostname else 0
+
+
 def extract_features(url: str, live_lookup: bool = True) -> list:
     """
-    Extract a numeric feature vector from *url*.
+    Extract a 22-element numeric feature vector from *url*.
 
     Features (in order):
-        0   url_length            – Total character length
-        1   dot_count             – Number of '.' characters
-        2   at_count              – Number of '@' characters
-        3   dash_count            – Number of '-' characters
-        4   underscore_count      – Number of '_' characters
-        5   has_ip                – 1 if hostname is an IP address, else 0
-        6   has_https             – 1 if scheme is HTTPS, else 0
-        7   suspicious_keyword_count – Count of suspicious words found
-        8   subdomain_count       – Number of subdomains (dots in hostname − 1)
-        9   entropy               – Shannon entropy of the URL string
-       10   domain_age_days       – Domain age in days (-1 if unknown)
-       11   whois_available       – 1 if WHOIS data exists, else 0
-       12   dns_a_record_count    – Number of DNS A records
-       13   dns_has_mx            – 1 if MX record exists, else 0
-
-    Args:
-        url: The URL to analyse.
-        live_lookup: If True, perform live WHOIS/DNS queries. Set to
-                     False during training on synthetic data to avoid
-                     thousands of network calls.
-
-    Returns:
-        list[float]: 14-element numeric vector.
+         0  url_length
+         1  dot_count
+         2  at_count
+         3  dash_count
+         4  underscore_count
+         5  has_ip
+         6  has_https
+         7  suspicious_keyword_count
+         8  subdomain_count
+         9  entropy
+        10  domain_age_days       (live)
+        11  whois_available       (live)
+        12  dns_a_record_count    (live)
+        13  dns_has_mx            (live)
+        14  is_shortened
+        15  redirect_count        (live)
+        16  ssl_valid             (live)
+        17  ssl_days_remaining    (live)
+        18  is_free_certificate   (live)
+        19  tld_risk_score
+        20  path_depth
+        21  has_punycode
     """
     try:
         parsed = urlparse(url if "://" in url else f"http://{url}")
     except Exception:
-        # If parsing fails, return a zero vector
-        return [0.0] * 14
+        return [0.0] * 22
 
     hostname = parsed.hostname or ""
 
-    # Basic counts
+    # ---- URL-lexical features (always computed) ----
     url_length = len(url)
     dot_count = url.count(".")
     at_count = url.count("@")
     dash_count = url.count("-")
     underscore_count = url.count("_")
-
-    # IP address check
     has_ip = 1 if IP_PATTERN.match(url) else 0
-
-    # HTTPS check
     has_https = 1 if parsed.scheme == "https" else 0
 
-    # Suspicious keywords
     url_lower = url.lower()
-    suspicious_keyword_count = sum(
-        1 for kw in SUSPICIOUS_KEYWORDS if kw in url_lower
-    )
-
-    # Subdomain count (dots in hostname minus 1, minimum 0)
+    suspicious_keyword_count = sum(1 for kw in SUSPICIOUS_KEYWORDS if kw in url_lower)
     subdomain_count = max(hostname.count(".") - 1, 0)
-
-    # Shannon entropy
     entropy = round(_shannon_entropy(url), 4)
 
-    # --- Host-based features ---
+    # Features computable offline
+    is_short = _is_shortened(hostname)
+    tld_risk = _tld_risk_score(hostname)
+    path_d = _path_depth(url)
+    punycode = _has_punycode(hostname)
+
+    # ---- Host-based / network features (live only) ----
     if live_lookup and hostname and not has_ip:
         domain_age_days = _get_domain_age_days(hostname)
         whois_avail = _whois_available(hostname)
         a_record_count = _dns_a_record_count(hostname)
         mx_exists = _dns_has_mx(hostname)
+        redirect_count = _count_redirects(url)
+        ssl_valid, ssl_days, is_free_cert = _ssl_info(hostname)
     elif live_lookup and has_ip:
-        # IP-based URLs: no meaningful WHOIS/DNS for domain
         domain_age_days = -1.0
         whois_avail = 0
         a_record_count = 0
         mx_exists = 0
+        redirect_count = _count_redirects(url)
+        ssl_valid, ssl_days, is_free_cert = 0, -1.0, 0
     else:
-        # Synthetic / offline mode – will be set by the training script
+        # Offline / training mode — caller will set these
         domain_age_days = -1.0
         whois_avail = 0
         a_record_count = 0
         mx_exists = 0
+        redirect_count = 0
+        ssl_valid, ssl_days, is_free_cert = 0, -1.0, 0
 
     return [
         float(url_length),
@@ -203,10 +295,18 @@ def extract_features(url: str, live_lookup: bool = True) -> list:
         float(whois_avail),
         float(a_record_count),
         float(mx_exists),
+        float(is_short),
+        float(redirect_count),
+        float(ssl_valid),
+        float(ssl_days),
+        float(is_free_cert),
+        float(tld_risk),
+        float(path_d),
+        float(punycode),
     ]
 
 
-# Feature names matching the vector indices (used by the frontend)
+# Feature names matching the vector indices
 FEATURE_NAMES = [
     "URL Length",
     "Dot Count",
@@ -222,7 +322,20 @@ FEATURE_NAMES = [
     "WHOIS Available",
     "DNS A Records",
     "DNS Has MX",
+    "Is Shortened URL",
+    "Redirect Count",
+    "SSL Valid",
+    "SSL Days Remaining",
+    "Free Certificate",
+    "TLD Risk Score",
+    "Path Depth",
+    "Has Punycode",
 ]
+
+# Grouping for the frontend
+URL_FEATURES = FEATURE_NAMES[:10]
+HOST_FEATURES = FEATURE_NAMES[10:14]
+SECURITY_FEATURES = FEATURE_NAMES[14:]
 
 
 # ===================================================================
@@ -233,39 +346,32 @@ def safe_preview(url: str) -> dict:
     """
     Safely fetch and analyse the content of *url*.
 
-    The function:
-      • Fetches raw HTML only (no JavaScript execution).
-      • Parses with BeautifulSoup.
-      • Extracts page title, form count, password field count,
-        external form-action domains, and suspicious keyword presence.
-      • Does NOT execute scripts or download files.
-
     Returns:
         dict with keys:
             page_title, form_count, password_fields,
-            external_domains, suspicious_keywords_found, warnings
+            external_domains, suspicious_keywords_found,
+            hidden_fields, iframe_count, warnings
     """
     result = {
         "page_title": "N/A",
         "form_count": 0,
         "password_fields": 0,
+        "hidden_fields": 0,
+        "iframe_count": 0,
         "external_domains": [],
         "suspicious_keywords_found": [],
         "warnings": [],
     }
 
     try:
-        # Ensure URL has a scheme
         fetch_url = url if url.startswith(("http://", "https://")) else f"http://{url}"
-
-        headers = {"User-Agent": "PhishingDetector/1.0 (Academic Research)"}
+        headers = {"User-Agent": "PhishingDetector/2.0 (Academic Research)"}
         response = requests.get(
             fetch_url, headers=headers, timeout=PREVIEW_TIMEOUT,
             allow_redirects=True, stream=False,
         )
         response.raise_for_status()
 
-        # Only process HTML content
         content_type = response.headers.get("Content-Type", "")
         if "text/html" not in content_type:
             result["warnings"].append("Response is not HTML content.")
@@ -273,19 +379,27 @@ def safe_preview(url: str) -> dict:
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # --- Page title ---
+        # Page title
         title_tag = soup.find("title")
         result["page_title"] = title_tag.get_text(strip=True) if title_tag else "No title"
 
-        # --- Forms ---
+        # Forms
         forms = soup.find_all("form")
         result["form_count"] = len(forms)
 
-        # --- Password fields ---
-        password_inputs = soup.find_all("input", attrs={"type": "password"})
-        result["password_fields"] = len(password_inputs)
+        # Password fields
+        pw = soup.find_all("input", attrs={"type": "password"})
+        result["password_fields"] = len(pw)
 
-        # --- External form-action domains ---
+        # Hidden fields
+        hidden = soup.find_all("input", attrs={"type": "hidden"})
+        result["hidden_fields"] = len(hidden)
+
+        # Iframes
+        iframes = soup.find_all("iframe")
+        result["iframe_count"] = len(iframes)
+
+        # External form-action domains
         parsed_url = urlparse(fetch_url)
         page_domain = parsed_url.hostname or ""
 
@@ -298,12 +412,12 @@ def safe_preview(url: str) -> dict:
 
         result["external_domains"] = list(set(result["external_domains"]))
 
-        # --- Suspicious keywords in visible text ---
+        # Suspicious keywords in visible text
         page_text = soup.get_text(separator=" ").lower()
         found_keywords = [kw for kw in SUSPICIOUS_KEYWORDS if kw in page_text]
         result["suspicious_keywords_found"] = found_keywords
 
-        # --- Build warnings list ---
+        # Build warnings
         if result["form_count"] > 0:
             result["warnings"].append(
                 f"Page contains {result['form_count']} form(s)."
@@ -311,6 +425,14 @@ def safe_preview(url: str) -> dict:
         if result["password_fields"] > 0:
             result["warnings"].append(
                 f"Page contains {result['password_fields']} password input field(s)."
+            )
+        if result["hidden_fields"] > 3:
+            result["warnings"].append(
+                f"Page contains {result['hidden_fields']} hidden input fields — potential data harvesting."
+            )
+        if result["iframe_count"] > 0:
+            result["warnings"].append(
+                f"Page embeds {result['iframe_count']} iframe(s) — may load external malicious content."
             )
         if result["external_domains"]:
             result["warnings"].append(

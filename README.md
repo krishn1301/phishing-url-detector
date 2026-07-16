@@ -1,31 +1,39 @@
-# 🔒 Phishing URL Detection Using Machine Learning
+# 🛡️ PhishGuard — Phishing URL Detection Using Machine Learning
 
-A complete, end-to-end Python web application that analyses URLs to detect phishing attempts using a trained Random Forest classifier. Built for cybersecurity academic research, this project features robust URL feature extraction, host-based analysis (WHOIS/DNS), and a Safe Preview module for safe analysis of malicious links.
+A professional-grade phishing URL detection system powered by **XGBoost** machine learning. Built for cybersecurity academic research, PhishGuard extracts **22 features** from any URL — including SSL/TLS certificate analysis, redirect chain detection, URL shortener identification, and TLD risk scoring — and classifies it in real-time through a premium dark-themed cybersecurity dashboard.
 
 ---
 
 ## 🚀 Features
 
-- **Machine Learning Classification**: Uses a Random Forest model trained on a balanced synthetic dataset.
-- **Advanced Feature Extraction**: Extracts 14 distinct features from any given URL:
-  - **URL Features**: Length, Dot/At/Dash/Underscore Counts, IP presence, HTTPS check, Suspicious Keywords count, Subdomain count, and Shannon Entropy.
-  - **Host-Based Features**: Domain Age (WHOIS), WHOIS Database Availability, DNS A Record count, and DNS MX Record presence.
-- **Safe Preview Module**: For URLs flagged with a risk score > 70%, the app safely fetches the raw HTML (without executing JavaScript or downloading payloads) and scans for:
-  - Hidden forms & password fields.
-  - External form-action submissions.
-  - Suspicious keywords hidden in the page body.
-- **Clean UI / Dashboard**: A minimal, responsive white-theme dashboard providing real-time risk scores and visual feature breakdowns.
+- **XGBoost ML Classifier**: Trained on 10,000 realistic synthetic URLs with 5-fold cross-validation and comprehensive evaluation reports.
+- **22-Feature Extraction Pipeline**:
+  - **URL-Lexical** (10): Length, dots, dashes, underscores, `@` symbols, IP-address usage, HTTPS, suspicious keywords, subdomain count, Shannon entropy.
+  - **Host-Based** (4): Domain age (WHOIS), WHOIS availability, DNS A record count, DNS MX record presence.
+  - **Security & Network** (8): URL shortener detection, redirect chain count, SSL certificate validity, SSL days remaining, free/DV certificate detection, TLD risk score, path depth, punycode/IDN detection.
+- **Safe Preview Module**: For high-risk URLs (>70%), safely fetches raw HTML and scans for hidden forms, password fields, external form submissions, iframes, and suspicious keywords.
+- **Scan History**: SQLite-backed persistence of all scan results with aggregate statistics.
+- **Premium Dark UI**: Cybersecurity-inspired dashboard with animated threat gauge, tabbed feature breakdown, scan history sidebar, and micro-animations.
 
 ---
 
 ## 📋 Architecture & Data Flow
 
-1. **User Input** → User submits a URL via the web front-end.
-2. **Feature Extraction (`utils.py`)** → The backend parses the URL and performs live WHOIS and DNS lookups to generate a 14-element numeric feature vector.
-3. **ML Prediction (`app.py`)** → The Flask backend feeds the vector into the pre-trained `phishing_model.pkl`.
-4. **Risk Scoring** → The model returns a classification (Legitimate/Phishing) and an exact risk percentage.
-5. **Safe Preview** → If Risk > 70%, `BeautifulSoup` scrapes the target's raw HTML for further forensic details.
-6. **Result Display (`index.html`)** → The payload is rendered gracefully on the UI.
+```
+User Input → Feature Extraction (22 features) → XGBoost Prediction → Risk Scoring
+                                                                         ↓
+                                              Safe Preview (if risk > 70%) → SQLite Storage
+                                                                         ↓
+                                                            Dashboard Rendering
+```
+
+1. **User Input** → User submits a URL via the web dashboard.
+2. **Feature Extraction (`utils.py`)** → Extracts a 22-element numeric feature vector with live SSL, WHOIS, DNS, and redirect lookups.
+3. **ML Prediction (`app.py`)** → XGBoost classifier returns classification + probability.
+4. **Threat Classification** → 4-tier system: Safe (≤20%) · Low Risk (≤50%) · Medium Risk (≤75%) · Critical (>75%).
+5. **Safe Preview** → If risk > 70%, `BeautifulSoup` scrapes the target's raw HTML for forensic details.
+6. **Persistence** → Every scan saved to SQLite with full feature data.
+7. **Dashboard** → Results rendered with animated gauge, colored badges, and feature tabs.
 
 ---
 
@@ -41,40 +49,80 @@ git clone https://github.com/krishn1301/phishing-url-detector.git
 cd phishing-url-detector
 ```
 
-### 2. Install Dependencies
+### 2. Create Virtual Environment (Recommended)
+```bash
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# macOS/Linux
+source .venv/bin/activate
+```
+
+### 3. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
-*(Packages include: `flask`, `scikit-learn`, `joblib`, `beautifulsoup4`, `requests`, `numpy`, `pandas`, `python-whois`, `dnspython`)*
 
-### 3. Train the Model
-The repository does not include the 2000-sample dataset or the compiled `.pkl` model to keep it lightweight. You must generate them first:
+**Packages:** `flask`, `scikit-learn`, `joblib`, `beautifulsoup4`, `requests`, `numpy`, `pandas`, `python-whois`, `dnspython`, `xgboost`, `tldextract`, `seaborn`, `matplotlib`
+
+### 4. Train the Model
 ```bash
 python train_model.py
 ```
-*Expected Output: Data generation logs, followed by model training metrics (Accuracy, Precision, Recall).*
+This will:
+- Generate 10,000 realistic URLs (balanced legitimate/phishing)
+- Extract 22 features per URL
+- Train an XGBoost classifier with 5-fold cross-validation
+- Save evaluation plots to `reports/` (confusion matrix, ROC curve, feature importance)
+- Save the model to `phishing_model.pkl`
 
-### 4. Run the Web App
+### 5. Run the Web App
 ```bash
 python app.py
 ```
-The server will start at `http://127.0.0.1:5000`.
+Open `http://127.0.0.1:5000` in your browser.
 
 ---
 
-## 📊 Screenshots & Application View
+## 📊 Screenshots
 
-### 🟢 Testing a Legitimate URL
-When tested with `https://www.google.com`, the system correctly identifies the domain's long-standing WHOIS records and active DNS, returning a low risk score.
+### Dashboard — Initial State
+![Dashboard](screenshots/dashboard.png)
 
-![Legitimate URL Example](https://raw.githubusercontent.com/krishn1301/phishing-url-detector/master/screenshots/legitimate.png)
+### 🟢 Legitimate URL Scan
+`https://www.google.com` → **Safe** (0.0% risk)
 
-### 🔴 Testing a Phishing URL
-When tested with a suspicious IP-based URL (`http://192.168.1.1/login/verify/account`), the system flags the missing WHOIS/DNS data and the presence of suspicious keywords, returning a high risk score and triggering the **Safe Preview Analysis**.
+![Legitimate URL](screenshots/legitimate.png)
 
-![Phishing URL Example](https://raw.githubusercontent.com/krishn1301/phishing-url-detector/master/screenshots/phishing.png)
+### 🔴 Phishing URL Scan
+`http://192.168.1.1/login/verify/account` → **Critical** (100% risk)
 
-*(Note: Add the screenshots to a `/screenshots` folder in your repo to render them here)*
+![Phishing URL](screenshots/phishing.png)
+
+---
+
+## 📈 Model Evaluation
+
+The XGBoost model achieves excellent performance on the test set:
+
+| Metric | Score |
+|---|---|
+| **Accuracy** | 1.0000 |
+| **Precision** | 1.0000 |
+| **Recall** | 1.0000 |
+| **F1-Score** | 1.0000 |
+| **ROC AUC** | 1.0000 |
+
+Evaluation plots are saved to `reports/`:
+- `confusion_matrix.png`
+- `roc_curve.png`
+- `feature_importance.png`
+
+### Top Features by Importance
+1. SSL Days Remaining
+2. Domain Age (days)
+3. Suspicious Keywords
+4. DNS A Records
 
 ---
 
@@ -83,22 +131,40 @@ When tested with a suspicious IP-based URL (`http://192.168.1.1/login/verify/acc
 ```text
 phishing-url-detector/
 │
-├── app.py                  # Flask backend & API routing
-├── train_model.py          # Dataset generator & Random Forest training script
-├── utils.py                # Feature extraction & Safe Preview logic
+├── app.py                  # Flask backend, SQLite history, API routes
+├── train_model.py          # URL generation, XGBoost training, evaluation plots
+├── utils.py                # 22-feature extraction & Safe Preview module
 ├── requirements.txt        # Python dependencies
-├── .gitignore              # Ignored files (models, datasets, cache)
+├── .gitignore              # Ignored files
 │
 ├── templates/
-│   └── index.html          # Web Interface UI
-└── static/
-    └── styles.css          # Minimalist styling dashboard
+│   └── index.html          # Cybersecurity dashboard UI
+├── static/
+│   └── styles.css          # Dark theme with glassmorphism & animations
+├── reports/                # Auto-generated evaluation plots
+│   ├── confusion_matrix.png
+│   ├── roc_curve.png
+│   └── feature_importance.png
+└── screenshots/            # App screenshots for README
 ```
 
 ---
 
+## 🔌 API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/` | Serve the dashboard |
+| `POST` | `/predict` | Scan a URL (body: `{"url": "..."}`) |
+| `GET` | `/api/history` | Last 50 scan results |
+| `DELETE` | `/api/history` | Clear all scan history |
+| `GET` | `/api/stats` | Aggregate scan statistics |
+
+---
+
 ## 🛡️ Security Disclaimer
-The **Safe Preview Module** is designed to fetch raw HTML without executing potentially malicious JavaScript payloads. However, excessive testing of active malware/phishing domains should always be done inside a sandboxed environment (e.g., a Virtual Machine) to prevent IP tracking or accidental execution.
+
+The **Safe Preview Module** fetches raw HTML without executing JavaScript. However, testing active phishing domains should be done inside a sandboxed environment (VM/container) to prevent IP tracking or accidental execution of malicious payloads.
 
 ---
 

@@ -4,21 +4,22 @@ __pycache__/
 *$py.class
 
 # Models and Datasets
-*.pkl
-*.csv
 phishing_model.pkl
 phishing_dataset.csv
+
+# Database
+scan_history.db
 
 # Virtual Environments
 venv/
 env/
 .env
-.venv
+.venv/
 ENV/
 env.bak/
 venv.bak/
 
-# IDES
+# IDEs
 .vscode/
 .idea/
 *.swp
@@ -27,3 +28,6 @@ venv.bak/
 # OS Data
 .DS_Store
 Thumbs.db
+
+# Gemini
+.gemini/

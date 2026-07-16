@@ -5,96 +5,217 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description"
-        content="Phishing URL Detection – Analyse any URL for phishing risk using Machine Learning.">
-    <title>Phishing URL Detector</title>
+        content="Phishing URL Detection – Analyse any URL for phishing risk using advanced Machine Learning with XGBoost.">
+    <title>PhishGuard — Phishing URL Detector</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 
 <body>
+    <div class="app-container">
 
-    <!-- Header -->
-    <div class="header">
-        <h1>🔒 Phishing URL Detector</h1>
-        <p>Analyse any URL for phishing risk using Machine Learning</p>
-    </div>
+        <!-- ─── Header ─── -->
+        <header class="header">
+            <div class="header-logo">
+                <svg class="shield-icon" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M24 4L6 12v12c0 11.1 7.7 21.5 18 24 10.3-2.5 18-12.9 18-24V12L24 4z"
+                        fill="url(#shield-grad)" opacity="0.15" stroke="url(#shield-grad)" stroke-width="2" />
+                    <path d="M20 24l4 4 8-8" stroke="#38bdf8" stroke-width="3" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                    <defs>
+                        <linearGradient id="shield-grad" x1="6" y1="4" x2="42" y2="48">
+                            <stop stop-color="#38bdf8" />
+                            <stop offset="1" stop-color="#34d399" />
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <h1>PhishGuard</h1>
+            </div>
+            <p>Advanced Phishing URL Detection powered by XGBoost Machine Learning</p>
+        </header>
 
-    <!-- Main Card -->
-    <div class="card">
-        <!-- Input -->
-        <div class="input-group">
-            <input type="text" id="urlInput" placeholder="Enter a URL to check…" autocomplete="off">
-            <button id="checkBtn" onclick="checkURL()">Check URL</button>
+        <!-- ─── Stats Bar ─── -->
+        <div class="stats-bar" id="statsBar">
+            <div class="stat-item">
+                <span class="stat-value" id="statTotal">—</span>
+                <span class="stat-label">Total Scans</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value" id="statPhishing">—</span>
+                <span class="stat-label">Phishing Detected</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value" id="statLegitimate">—</span>
+                <span class="stat-label">Legitimate</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value" id="statAvgRisk">—</span>
+                <span class="stat-label">Avg Risk Score</span>
+            </div>
         </div>
 
-        <!-- Loader -->
-        <div class="loader" id="loader">
-            <div class="spinner"></div>
-            Analysing URL…
-        </div>
+        <!-- ─── Main Grid ─── -->
+        <div class="main-grid">
 
-        <!-- Error -->
-        <div class="error-msg" id="errorMsg"></div>
+            <!-- ═══ Left: Analysis Panel ═══ -->
+            <div>
+                <div class="card">
+                    <!-- Input -->
+                    <div class="input-group">
+                        <input type="text" id="urlInput" placeholder="Enter a URL to analyse…" autocomplete="off">
+                        <button id="checkBtn" onclick="checkURL()">
+                            <span id="btnText">Scan URL</span>
+                        </button>
+                    </div>
 
-        <!-- Results -->
-        <div class="results" id="results">
-            <!-- Classification -->
-            <div id="badgeContainer"></div>
+                    <!-- Loader -->
+                    <div class="loader" id="loader">
+                        <div class="spinner"></div>
+                        Scanning URL — checking features, SSL, redirects…
+                    </div>
 
-            <!-- Risk Bar -->
-            <div class="risk-section">
-                <div class="label-row">
-                    <span>Risk Score</span>
-                    <span id="riskPct">0%</span>
+                    <!-- Error -->
+                    <div class="error-msg" id="errorMsg"></div>
+
+                    <!-- Results -->
+                    <div class="results" id="results">
+
+                        <!-- Threat Level Header -->
+                        <div class="threat-header">
+                            <div>
+                                <span class="threat-badge" id="threatBadge">
+                                    <span class="dot"></span>
+                                    <span id="threatLabel">—</span>
+                                </span>
+                            </div>
+                            <span class="classification-label" id="classLabel"></span>
+                        </div>
+
+                        <!-- Risk Gauge -->
+                        <div class="gauge-container">
+                            <div class="gauge-wrapper">
+                                <svg class="gauge-svg" viewBox="0 0 120 120">
+                                    <circle class="gauge-bg" cx="60" cy="60" r="52" />
+                                    <circle class="gauge-fill" id="gaugeFill" cx="60" cy="60" r="52"
+                                        stroke-dasharray="326.73" stroke-dashoffset="326.73" />
+                                </svg>
+                                <div class="gauge-center">
+                                    <div class="gauge-pct" id="gaugePct">0%</div>
+                                    <div class="gauge-label">Risk</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Red Flags Summary -->
+                        <div class="flags-summary" id="flagsSummary"></div>
+
+                        <!-- Accordion Sections -->
+                        <div class="accordion" id="accordionSections">
+                            <div class="accordion-item">
+                                <button class="accordion-header" onclick="toggleAccordion(this)">
+                                    <span class="accordion-icon">🔗</span>
+                                    <span class="accordion-title">URL Analysis</span>
+                                    <span class="accordion-flag-count" id="urlFlagCount"></span>
+                                    <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+                                </button>
+                                <div class="accordion-body">
+                                    <div class="features-list" id="urlFeaturesGrid"></div>
+                                </div>
+                            </div>
+                            <div class="accordion-item">
+                                <button class="accordion-header" onclick="toggleAccordion(this)">
+                                    <span class="accordion-icon">🌐</span>
+                                    <span class="accordion-title">Host Analysis</span>
+                                    <span class="accordion-flag-count" id="hostFlagCount"></span>
+                                    <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+                                </button>
+                                <div class="accordion-body">
+                                    <div class="features-list" id="hostFeaturesGrid"></div>
+                                </div>
+                            </div>
+                            <div class="accordion-item">
+                                <button class="accordion-header" onclick="toggleAccordion(this)">
+                                    <span class="accordion-icon">🔒</span>
+                                    <span class="accordion-title">SSL & Security</span>
+                                    <span class="accordion-flag-count" id="securityFlagCount"></span>
+                                    <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+                                </button>
+                                <div class="accordion-body">
+                                    <div class="features-list" id="securityFeaturesGrid"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Safe Preview (conditional) -->
+                        <div class="preview-section" id="previewSection" style="display:none"></div>
+                    </div>
                 </div>
-                <div class="risk-bar-bg">
-                    <div class="risk-bar-fill" id="riskBar" style="width:0%"></div>
+            </div>
+
+            <!-- ═══ Right: Scan History Sidebar ═══ -->
+            <div>
+                <div class="history-card">
+                    <div class="history-header">
+                        <h3>📋 Scan History</h3>
+                        <button class="clear-btn" id="clearHistoryBtn" onclick="clearHistory()">Clear All</button>
+                    </div>
+                    <div class="history-list" id="historyList">
+                        <div class="history-empty" id="historyEmpty">No scans yet. Enter a URL above to get
+                            started.</div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Feature Indicators -->
-            <div class="features-section">
-                <h3>URL Features</h3>
-                <div class="features-grid" id="featuresGrid"></div>
-            </div>
-
-            <!-- Host-Based Features -->
-            <div class="features-section">
-                <h3>🌐 Host-Based Features</h3>
-                <div class="features-grid" id="hostFeaturesGrid"></div>
-            </div>
-
-            <!-- Safe Preview (conditional) -->
-            <div class="preview-section" id="previewSection" style="display:none"></div>
         </div>
-    </div>
+        <!-- /main-grid -->
 
-    <!-- Footer -->
-    <div class="footer">
-        Phishing URL Detection &mdash; Academic Mini Project &copy; 2026
-    </div>
+        <!-- ─── Footer ─── -->
+        <footer class="footer">
+            PhishGuard — Phishing URL Detection &mdash; Academic Mini Project &copy; 2026
+        </footer>
 
-    <!-- ============ JavaScript ============ -->
+    </div>
+    <!-- /app-container -->
+
+    <!-- ════════════════ JavaScript ════════════════ -->
     <script>
+        // ─── DOM References ───
         const urlInput = document.getElementById('urlInput');
         const checkBtn = document.getElementById('checkBtn');
+        const btnText = document.getElementById('btnText');
         const loader = document.getElementById('loader');
         const errorMsg = document.getElementById('errorMsg');
         const results = document.getElementById('results');
 
-        // Allow Enter key to trigger check
+        // Allow Enter key
         urlInput.addEventListener('keydown', e => {
             if (e.key === 'Enter') checkURL();
         });
 
+        // ─── Constants ───
+        const GAUGE_CIRCUMFERENCE = 2 * Math.PI * 52; // ~326.73
+        const BOOLEAN_FEATURES = new Set([
+            'Has IP Address', 'Has HTTPS', 'WHOIS Available', 'DNS Has MX',
+            'Is Shortened URL', 'SSL Valid', 'Free Certificate', 'Has Punycode'
+        ]);
+
+        // ─── Load stats & history on page load ───
+        document.addEventListener('DOMContentLoaded', () => {
+            loadStats();
+            loadHistory();
+        });
+
+        // ═══════════════════════════════════════════
+        // SCAN URL
+        // ═══════════════════════════════════════════
         async function checkURL() {
             const url = urlInput.value.trim();
-            if (!url) { showError('Please enter a URL.'); return; }
+            if (!url) { showError('Please enter a URL to scan.'); return; }
 
-            // Reset UI
             hideError();
             results.classList.remove('active');
             loader.classList.add('active');
             checkBtn.disabled = true;
+            btnText.textContent = 'Scanning…';
 
             try {
                 const res = await fetch('/predict', {
@@ -111,47 +232,73 @@
                 }
 
                 renderResults(data);
+                loadStats();
+                loadHistory();
+
             } catch (err) {
-                showError('Network error – is the server running?');
+                showError('Network error — is the server running?');
             } finally {
                 loader.classList.remove('active');
                 checkBtn.disabled = false;
+                btnText.textContent = 'Scan URL';
             }
         }
 
-        /* ---- Render ---- */
+        // Store red flags globally for use in rendering
+        let currentRedFlags = {};
+
+        // ═══════════════════════════════════════════
+        // RENDER RESULTS
+        // ═══════════════════════════════════════════
         function renderResults(data) {
-            // Badge
-            const isPhishing = data.classification === 'Phishing';
-            document.getElementById('badgeContainer').innerHTML =
-                `<span class="badge ${isPhishing ? 'phishing' : 'legitimate'}">${data.classification}</span>`;
-
-            // Risk bar
             const pct = data.risk_percentage;
-            document.getElementById('riskPct').textContent = pct.toFixed(1) + '%';
-            const bar = document.getElementById('riskBar');
-            bar.style.width = '0%';
-            bar.style.background = riskColor(pct);
-            requestAnimationFrame(() => { bar.style.width = pct + '%'; });
+            const css = data.threat_css;  // safe | low | medium | critical
+            currentRedFlags = data.red_flags || {};
 
-            // Features — split into URL (first 10) and Host-based (last 4)
-            const HOST_FEATURES = ['Domain Age (days)', 'WHOIS Available', 'DNS A Records', 'DNS Has MX'];
-            const grid = document.getElementById('featuresGrid');
-            const hostGrid = document.getElementById('hostFeaturesGrid');
-            grid.innerHTML = '';
-            hostGrid.innerHTML = '';
-            for (const [name, value] of Object.entries(data.features)) {
-                const div = document.createElement('div');
-                div.className = 'feature-item';
-                div.innerHTML = `<span class="f-name">${name}</span><span class="f-value">${value}</span>`;
-                if (HOST_FEATURES.includes(name)) {
-                    hostGrid.appendChild(div);
-                } else {
-                    grid.appendChild(div);
-                }
-            }
+            // — Threat badge —
+            const badge = document.getElementById('threatBadge');
+            badge.className = `threat-badge ${css}`;
+            document.getElementById('threatLabel').textContent = data.threat_level;
+            document.getElementById('classLabel').textContent =
+                `Classified as ${data.classification}  ·  ${pct.toFixed(1)}% risk`;
 
-            // Preview
+            // — Gauge animation —
+            const gaugeFill = document.getElementById('gaugeFill');
+            const offset = GAUGE_CIRCUMFERENCE - (pct / 100) * GAUGE_CIRCUMFERENCE;
+            gaugeFill.style.stroke = gaugeColor(css);
+            gaugeFill.style.transition = 'none';
+            gaugeFill.style.strokeDashoffset = GAUGE_CIRCUMFERENCE;
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    gaugeFill.style.transition = 'stroke-dashoffset 1.2s ease, stroke 0.5s ease';
+                    gaugeFill.style.strokeDashoffset = offset;
+                });
+            });
+            const gaugePct = document.getElementById('gaugePct');
+            gaugePct.textContent = '0%';
+            gaugePct.style.color = gaugeColor(css);
+            animateCounter(gaugePct, 0, pct, 1000);
+
+            // — Red flags summary —
+            renderFlagsSummary(currentRedFlags);
+
+            // — Feature accordions —
+            const groups = data.feature_groups;
+            const urlFlags = populateFeatures('urlFeaturesGrid', data.features, groups.url, currentRedFlags);
+            const hostFlags = populateFeatures('hostFeaturesGrid', data.features, groups.host, currentRedFlags);
+            const secFlags = populateFeatures('securityFeaturesGrid', data.features, groups.security, currentRedFlags);
+
+            // Update flag counts on accordion headers
+            setFlagCount('urlFlagCount', urlFlags);
+            setFlagCount('hostFlagCount', hostFlags);
+            setFlagCount('securityFlagCount', secFlags);
+
+            // Collapse all accordions, then open the first one
+            document.querySelectorAll('.accordion-item').forEach(item => item.classList.remove('open'));
+            const firstHeader = document.querySelector('.accordion-header');
+            if (firstHeader) toggleAccordion(firstHeader);
+
+            // — Preview —
             const previewSection = document.getElementById('previewSection');
             if (data.preview) {
                 previewSection.style.display = '';
@@ -163,19 +310,110 @@
             results.classList.add('active');
         }
 
+        // ─── Red Flags Summary ───
+        function renderFlagsSummary(flags) {
+            const el = document.getElementById('flagsSummary');
+            const dangerCount = Object.values(flags).filter(f => f.severity === 'danger').length;
+            const warnCount = Object.values(flags).filter(f => f.severity === 'warning').length;
+            const safeCount = Object.values(flags).filter(f => f.severity === 'safe').length;
+
+            if (dangerCount === 0 && warnCount === 0) {
+                el.innerHTML = `<div class="flags-summary-inner flags-all-clear">
+                    <span class="flag-summary-icon">✅</span>
+                    <span>All ${safeCount} parameters passed — no red flags detected</span>
+                </div>`;
+            } else {
+                el.innerHTML = `<div class="flags-summary-inner flags-has-issues">
+                    ${dangerCount > 0 ? `<span class="flag-pill danger">🚩 ${dangerCount} Red Flag${dangerCount > 1 ? 's' : ''}</span>` : ''}
+                    ${warnCount > 0 ? `<span class="flag-pill warning">⚠️ ${warnCount} Warning${warnCount > 1 ? 's' : ''}</span>` : ''}
+                    <span class="flag-pill safe">✅ ${safeCount} Passed</span>
+                </div>`;
+            }
+        }
+
+        // ─── Set flag count badge on accordion header ───
+        function setFlagCount(elId, count) {
+            const el = document.getElementById(elId);
+            if (count > 0) {
+                el.innerHTML = `<span class="flag-badge">${count} 🚩</span>`;
+            } else {
+                el.innerHTML = `<span class="flag-badge clear">✓</span>`;
+            }
+        }
+
+        // ─── Populate feature list with red flags ───
+        function populateFeatures(gridId, features, names, redFlags) {
+            const grid = document.getElementById(gridId);
+            grid.innerHTML = '';
+            let flagCount = 0;
+
+            for (const name of names) {
+                const value = features[name];
+                const flag = redFlags[name] || { flagged: false, severity: 'safe', reason: '' };
+                if (flag.flagged) flagCount++;
+
+                const div = document.createElement('div');
+                div.className = `feature-row ${flag.flagged ? 'flagged-' + flag.severity : ''}`;
+
+                let valHtml;
+                if (BOOLEAN_FEATURES.has(name)) {
+                    const isTrue = Number(value) === 1;
+                    const chipText = isTrue ? 'Yes' : 'No';
+                    if (name === 'Has IP Address' || name === 'Is Shortened URL' ||
+                        name === 'Free Certificate' || name === 'Has Punycode') {
+                        const riskChipClass = isTrue ? 'no' : 'yes';
+                        valHtml = `<span class="f-chip ${riskChipClass}">${chipText}</span>`;
+                    } else {
+                        const chipClass = isTrue ? 'yes' : 'no';
+                        valHtml = `<span class="f-chip ${chipClass}">${chipText}</span>`;
+                    }
+                } else if (name === 'TLD Risk Score') {
+                    const score = Number(value);
+                    const cls = score >= 0.7 ? 'no' : score >= 0.4 ? 'warn' : 'yes';
+                    valHtml = `<span class="f-chip ${cls}">${score.toFixed(1)}</span>`;
+                } else {
+                    valHtml = `<span class="f-value">${formatNum(value)}</span>`;
+                }
+
+                // Flag indicator
+                let flagIcon = '';
+                if (flag.severity === 'danger') flagIcon = '<span class="flag-icon danger">🚩</span>';
+                else if (flag.severity === 'warning') flagIcon = '<span class="flag-icon warning">⚠️</span>';
+                else flagIcon = '<span class="flag-icon safe">✅</span>';
+
+                div.innerHTML = `
+                    <div class="feature-main">
+                        ${flagIcon}
+                        <span class="f-name">${name}</span>
+                        ${valHtml}
+                    </div>
+                    <div class="feature-reason ${flag.severity}">${flag.reason}</div>
+                `;
+                grid.appendChild(div);
+            }
+            return flagCount;
+        }
+
+        // ─── Accordion toggle ───
+        function toggleAccordion(btn) {
+            const item = btn.closest('.accordion-item');
+            const isOpen = item.classList.contains('open');
+            // Toggle this item
+            item.classList.toggle('open');
+        }
+
+        // ─── Build preview HTML ───
         function buildPreview(p) {
-            let html = `<h3>⚠ Safe Preview Analysis</h3>`;
+            let html = `<h3>⚠️ Safe Preview Analysis</h3>`;
             html += `<div class="preview-item"><strong>Page Title:</strong> ${esc(p.page_title)}</div>`;
-            html += `<div class="preview-item"><strong>Forms:</strong> ${p.form_count} &nbsp;|&nbsp; <strong>Password Fields:</strong> ${p.password_fields}</div>`;
+            html += `<div class="preview-item"><strong>Forms:</strong> ${p.form_count} &nbsp;|&nbsp; <strong>Password Fields:</strong> ${p.password_fields} &nbsp;|&nbsp; <strong>Hidden Fields:</strong> ${p.hidden_fields} &nbsp;|&nbsp; <strong>Iframes:</strong> ${p.iframe_count}</div>`;
 
             if (p.external_domains && p.external_domains.length) {
                 html += `<div class="preview-item"><strong>External Form Domains:</strong> ${p.external_domains.map(esc).join(', ')}</div>`;
             }
-
             if (p.suspicious_keywords_found && p.suspicious_keywords_found.length) {
                 html += `<div class="preview-item"><strong>Suspicious Keywords:</strong> ${p.suspicious_keywords_found.join(', ')}</div>`;
             }
-
             if (p.warnings && p.warnings.length) {
                 html += `<ul class="warning-list">`;
                 p.warnings.forEach(w => { html += `<li>${esc(w)}</li>`; });
@@ -184,11 +422,124 @@
             return html;
         }
 
-        /* ---- Helpers ---- */
-        function riskColor(pct) {
-            if (pct < 30) return 'var(--success)';
-            if (pct < 70) return 'var(--warning)';
-            return 'var(--danger)';
+        // ═══════════════════════════════════════════
+        // STATS
+        // ═══════════════════════════════════════════
+        async function loadStats() {
+            try {
+                const res = await fetch('/api/stats');
+                const s = await res.json();
+                document.getElementById('statTotal').textContent = s.total_scans;
+                document.getElementById('statPhishing').textContent = s.phishing_detected;
+                document.getElementById('statLegitimate').textContent = s.legitimate_detected;
+                document.getElementById('statAvgRisk').textContent = s.avg_risk_score.toFixed(1) + '%';
+            } catch (e) {
+                // silently fail
+            }
+        }
+
+        // ═══════════════════════════════════════════
+        // SCAN HISTORY
+        // ═══════════════════════════════════════════
+        async function loadHistory() {
+            try {
+                const res = await fetch('/api/history');
+                const scans = await res.json();
+                const container = document.getElementById('historyList');
+                const emptyMsg = document.getElementById('historyEmpty');
+
+                if (!scans.length) {
+                    container.innerHTML = '';
+                    container.appendChild(emptyMsg);
+                    emptyMsg.style.display = '';
+                    return;
+                }
+
+                container.innerHTML = '';
+                for (const scan of scans) {
+                    const threatCss = threatClass(scan.risk_score);
+                    const timeAgo = formatTimeAgo(scan.scanned_at);
+                    const item = document.createElement('div');
+                    item.className = 'history-item';
+                    item.onclick = () => {
+                        urlInput.value = scan.url;
+                        urlInput.focus();
+                    };
+                    item.innerHTML = `
+                        <span class="history-url" title="${esc(scan.url)}">${esc(scan.url)}</span>
+                        <div class="history-meta">
+                            <span class="history-risk ${threatCss}">${scan.threat_level}</span>
+                            <span class="history-time">${timeAgo}</span>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                }
+            } catch (e) {
+                // silently fail
+            }
+        }
+
+        async function clearHistory() {
+            try {
+                await fetch('/api/history', { method: 'DELETE' });
+                loadHistory();
+                loadStats();
+            } catch (e) {
+                showError('Failed to clear history.');
+            }
+        }
+
+        // ═══════════════════════════════════════════
+        // HELPERS
+        // ═══════════════════════════════════════════
+        function gaugeColor(css) {
+            const map = {
+                safe: '#10b981',
+                low: '#22d3ee',
+                medium: '#f59e0b',
+                critical: '#ef4444',
+            };
+            return map[css] || '#38bdf8';
+        }
+
+        function threatClass(risk) {
+            if (risk <= 20) return 'safe';
+            if (risk <= 50) return 'low';
+            if (risk <= 75) return 'medium';
+            return 'critical';
+        }
+
+        function animateCounter(el, from, to, duration) {
+            const start = performance.now();
+            function tick(now) {
+                const elapsed = now - start;
+                const progress = Math.min(elapsed / duration, 1);
+                const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+                const current = from + (to - from) * eased;
+                el.textContent = current.toFixed(1) + '%';
+                if (progress < 1) requestAnimationFrame(tick);
+            }
+            requestAnimationFrame(tick);
+        }
+
+        function formatNum(v) {
+            const n = Number(v);
+            if (isNaN(n)) return v;
+            return Number.isInteger(n) ? n : n.toFixed(2);
+        }
+
+        function formatTimeAgo(isoStr) {
+            const date = new Date(isoStr);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMin = Math.floor(diffMs / 60000);
+            if (diffMin < 1) return 'Just now';
+            if (diffMin < 60) return `${diffMin}m ago`;
+            const diffHr = Math.floor(diffMin / 60);
+            if (diffHr < 24) return `${diffHr}h ago`;
+            const diffDay = Math.floor(diffHr / 24);
+            if (diffDay < 7) return `${diffDay}d ago`;
+            return date.toLocaleDateString();
         }
 
         function showError(msg) {

@@ -1,6 +1,10 @@
-# 🛡️ PhishGuard — Phishing URL Detection Using Machine Learning
+# PhishGuard
 
-A professional-grade phishing URL detection system powered by **XGBoost** machine learning. Built for cybersecurity academic research, PhishGuard extracts **22 features** from any URL — including SSL/TLS certificate analysis, redirect chain detection, URL shortener identification, and TLD risk scoring — and classifies it in real-time through a premium dark-themed cybersecurity dashboard.
+**The modelling was the easy half.** A classifier hands you a number between 0 and 1, and nobody outside the team can act on `0.83`.
+
+PhishGuard extracts 22 signals from a URL — lexical shape, WHOIS and DNS, SSL certificate, redirect chain — then collapses the resulting probability into one of four tiers a non-specialist can act on: **Safe · Low · Medium · Critical**. Forensic evidence (hidden forms, password fields, off-site form targets) is fetched and shown only once a URL crosses the high-risk line, because surfacing it for everything is how you train people to ignore it.
+
+Built as an academic project. **Read [Scope and limits](#scope-and-limits) before quoting the evaluation metrics** — they are an artifact of the training data, and the README explains exactly why.
 
 ---
 
@@ -101,9 +105,9 @@ Open `http://127.0.0.1:5000` in your browser.
 
 ---
 
-## 📈 Model Evaluation
+## Model evaluation
 
-The XGBoost model achieves excellent performance on the test set:
+The reported test-set scores are:
 
 | Metric | Score |
 |---|---|
@@ -118,11 +122,37 @@ Evaluation plots are saved to `reports/`:
 - `roc_curve.png`
 - `feature_importance.png`
 
-### Top Features by Importance
+### Top features by importance
 1. SSL Days Remaining
 2. Domain Age (days)
 3. Suspicious Keywords
 4. DNS A Records
+
+<a name="scope-and-limits"></a>
+## Scope and limits
+
+**Those 1.0000 scores are an artifact of the training data, not evidence that the model detects phishing.**
+
+`train_model.py` generates a synthetic dataset, then assigns the host-based features *from the label itself*:
+
+```python
+if y[i] == 0:      # legitimate
+    X[i][10] = float(random.randint(365, 9000))        # domain_age_days
+else:              # phishing
+    X[i][10] = float(random.choice([-1, *range(0, 90)]))
+```
+
+`domain_age_days` is therefore perfectly separable — every legitimate row is >= 365, every phishing row <= 89, with no overlap. A single decision stump splitting at 365 would also score 1.0000. The same holds for `ssl_days_remaining`, `whois_available` and `dns_has_mx`, and it is why the two most important features above are precisely the leaked ones.
+
+This is target leakage. The classifier learned the generator, not phishing.
+
+There is a second gap in the same seam: those host features are **simulated** during training but **looked up live** at inference (`extract_features(url, live_lookup=True)`). Even without the leak, the model would be scoring a distribution it never trained on.
+
+**What would make the numbers mean something:** a real labelled corpus — PhishTank or OpenPhish for positives, Tranco for negatives — with host features resolved live at training time, so train and serve see the same distribution. Until that exists, treat the feature-extraction pipeline, the risk-tier design and the evidence-gating UX as the deliverable, and treat the metrics as unvalidated.
+
+### Known inconsistency
+
+The Safe Preview trigger and the risk tiers disagree at the edges. `RISK_THRESHOLD = 0.70` fires the evidence fetch above 70%, but the "Critical" tier does not begin until 75%. URLs scoring 70–75% are labelled **Medium Risk** and still fetch forensic evidence.
 
 ---
 
